@@ -9,7 +9,7 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// 🔥 MANUAL USER ID → SOCKET ID MAP
+// 🔥 USER ID → SOCKET ID MAP
 const users = {};
 
 io.on("connection", (socket) => {
@@ -22,12 +22,19 @@ io.on("connection", (socket) => {
 
     console.log("🆔 REGISTERED:", userId, "=>", socket.id);
     console.log("📦 USERS MAP:", users);
+
+    // 🟢 SEND ONLINE USERS LIST
+    io.emit("online-users", Object.keys(users));
   });
 
   // 📞 CALL USER
   socket.on("call-user", ({ to, offer, type }) => {
-    const targetSocketId = users[to];
+    if (to === socket.userId) {
+      console.log("❌ SELF CALL BLOCKED:", to);
+      return;
+    }
 
+    const targetSocketId = users[to];
     if (!targetSocketId) {
       console.log("❌ USER NOT FOUND:", to);
       return;
@@ -60,12 +67,10 @@ io.on("connection", (socket) => {
 
   // 💬 SEND CHAT MESSAGE
   socket.on("send-message", ({ to, message }) => {
-    const targetSocketId = users[to];
+    if (to === socket.userId) return;
 
-    if (!targetSocketId) {
-      console.log("❌ CHAT USER NOT FOUND:", to);
-      return;
-    }
+    const targetSocketId = users[to];
+    if (!targetSocketId) return;
 
     io.to(targetSocketId).emit("receive-message", {
       from: socket.userId,
@@ -76,16 +81,28 @@ io.on("connection", (socket) => {
     console.log("💬 MESSAGE:", socket.userId, "→", to);
   });
 
+  // ❌ END CALL (FIXED PLACE)
+  socket.on("end-call", ({ to }) => {
+    const targetSocketId = users[to];
+    if (!targetSocketId) return;
+
+    io.to(targetSocketId).emit("call-ended");
+    console.log("📴 CALL ENDED:", socket.userId, "→", to);
+  });
+
   // ❌ DISCONNECT
   socket.on("disconnect", () => {
     if (socket.userId) {
       delete users[socket.userId];
+
       console.log("❌ DISCONNECTED:", socket.userId);
+      console.log("📦 USERS MAP:", users);
+
+      // 🟢 UPDATE ONLINE USERS LIST
+      io.emit("online-users", Object.keys(users));
     }
   });
 });
-
-
 
 server.listen(5000, () => {
   console.log("🚀 Signalling server running on port 5000");
