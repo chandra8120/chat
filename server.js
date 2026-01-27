@@ -9,7 +9,7 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// 🔥 MANUAL ID → SOCKET ID MAP
+// 🔥 MANUAL USER ID → SOCKET ID MAP
 const users = {};
 
 io.on("connection", (socket) => {
@@ -26,9 +26,6 @@ io.on("connection", (socket) => {
 
   // 📞 CALL USER
   socket.on("call-user", ({ to, offer, type }) => {
-    console.log("📞 CALL REQUEST TO:", to);
-    console.log("📦 CURRENT USERS:", users);
-
     const targetSocketId = users[to];
 
     if (!targetSocketId) {
@@ -42,9 +39,10 @@ io.on("connection", (socket) => {
       type,
     });
 
-    console.log("✅ CALL SENT TO:", to);
+    console.log("📞 CALL SENT:", socket.userId, "→", to);
   });
 
+  // ✅ ANSWER CALL
   socket.on("answer-call", ({ to, answer }) => {
     const targetSocketId = users[to];
     if (!targetSocketId) return;
@@ -52,6 +50,7 @@ io.on("connection", (socket) => {
     io.to(targetSocketId).emit("call-answered", { answer });
   });
 
+  // ❄️ ICE CANDIDATE
   socket.on("ice-candidate", ({ to, candidate }) => {
     const targetSocketId = users[to];
     if (!targetSocketId) return;
@@ -59,6 +58,25 @@ io.on("connection", (socket) => {
     io.to(targetSocketId).emit("ice-candidate", { candidate });
   });
 
+  // 💬 SEND CHAT MESSAGE
+  socket.on("send-message", ({ to, message }) => {
+    const targetSocketId = users[to];
+
+    if (!targetSocketId) {
+      console.log("❌ CHAT USER NOT FOUND:", to);
+      return;
+    }
+
+    io.to(targetSocketId).emit("receive-message", {
+      from: socket.userId,
+      message,
+      time: Date.now(),
+    });
+
+    console.log("💬 MESSAGE:", socket.userId, "→", to);
+  });
+
+  // ❌ DISCONNECT
   socket.on("disconnect", () => {
     if (socket.userId) {
       delete users[socket.userId];
@@ -67,6 +85,8 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(5000, () =>
-  console.log("🚀 Signalling server running on port 5000")
-);
+
+
+server.listen(5000, () => {
+  console.log("🚀 Signalling server running on port 5000");
+});
