@@ -81,7 +81,7 @@ io.on("connection", (socket) => {
     console.log("💬 MESSAGE:", socket.userId, "→", to);
   });
 
-  // ❌ END CALL (FIXED PLACE)
+  // ❌ END CALL 
   socket.on("end-call", ({ to }) => {
     const targetSocketId = users[to];
     if (!targetSocketId) return;
