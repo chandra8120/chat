@@ -9,22 +9,40 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// 🔥 USER ID → SOCKET ID MAP   
+// 🔥 USER ID → { socketId, profile } MAP
 const users = {};
+
+function broadcastOnlineUsers() {
+  const list = Object.entries(users).map(([id, u]) => ({
+    id,
+    profile: u.profile || null,
+  }));
+  io.emit("online-users", list);
+}
 
 io.on("connection", (socket) => {
   console.log("🔌 Connected socket:", socket.id);
 
   // ✅ REGISTER USER
-  socket.on("register", (userId) => {
-    users[userId] = socket.id;
+  socket.on("register", (userId, profile) => {
+    const existing = users[userId];
+    if (existing && existing.socketId !== socket.id) {
+      const existingSocket = io.sockets.sockets.get(existing.socketId);
+      if (existingSocket && existingSocket.connected) {
+        console.log("❌ ID TAKEN:", userId);
+        socket.emit("id-taken", { id: userId });
+        return;
+      }
+    }
+
+    users[userId] = { socketId: socket.id, profile: profile || null };
     socket.userId = userId;
 
     console.log("🆔 REGISTERED:", userId, "=>", socket.id);
     console.log("📦 USERS MAP:", users);
 
     // 🟢 SEND ONLINE USERS LIST
-    io.emit("online-users", Object.keys(users));
+    broadcastOnlineUsers();
   });
 
   // 📞 CALL USER
@@ -34,9 +52,10 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const targetSocketId = users[to];
+    const targetSocketId = users[to]?.socketId;
     if (!targetSocketId) {
       console.log("❌ USER NOT FOUND:", to);
+      socket.emit("call-failed", { to, reason: "offline" });
       return;
     }
 
@@ -51,7 +70,7 @@ io.on("connection", (socket) => {
 
   // ✅ ANSWER CALL
   socket.on("answer-call", ({ to, answer }) => {
-    const targetSocketId = users[to];
+    const targetSocketId = users[to]?.socketId;
     if (!targetSocketId) return;
 
     io.to(targetSocketId).emit("call-answered", { answer });
@@ -59,7 +78,7 @@ io.on("connection", (socket) => {
 
   // ❄️ ICE CANDIDATE
   socket.on("ice-candidate", ({ to, candidate }) => {
-    const targetSocketId = users[to];
+    const targetSocketId = users[to]?.socketId;
     if (!targetSocketId) return;
 
     io.to(targetSocketId).emit("ice-candidate", { candidate });
@@ -68,9 +87,14 @@ io.on("connection", (socket) => {
   // 💬 SEND CHAT MESSAGE
   socket.on("send-message", ({ to, message }) => {
     if (to === socket.userId) return;
+    if (!message || !message.trim()) return;
 
-    const targetSocketId = users[to];
-    if (!targetSocketId) return;
+    const targetSocketId = users[to]?.socketId;
+    if (!targetSocketId) {
+      console.log("❌ MESSAGE TARGET NOT FOUND:", to);
+      socket.emit("message-failed", { to, reason: "offline" });
+      return;
+    }
 
     io.to(targetSocketId).emit("receive-message", {
       from: socket.userId,
@@ -81,25 +105,31 @@ io.on("connection", (socket) => {
     console.log("💬 MESSAGE:", socket.userId, "→", to);
   });
 
-  // ❌ END CALL 
+  // ❌ END CALL
   socket.on("end-call", ({ to }) => {
-    const targetSocketId = users[to];
-    if (!targetSocketId) return;
+    if (!to || to === socket.userId) return;
 
-    io.to(targetSocketId).emit("call-ended");
+    const targetSocketId = users[to]?.socketId;
+    if (!targetSocketId) {
+      console.log("❌ END-CALL TARGET NOT FOUND:", to);
+      socket.emit("call-failed", { to, reason: "offline" });
+      return;
+    }
+
+    io.to(targetSocketId).emit("call-ended", { from: socket.userId });
     console.log("📴 CALL ENDED:", socket.userId, "→", to);
   });
 
   // ❌ DISCONNECT
   socket.on("disconnect", () => {
-    if (socket.userId) {
+    if (socket.userId && users[socket.userId]?.socketId === socket.id) {
       delete users[socket.userId];
 
       console.log("❌ DISCONNECTED:", socket.userId);
       console.log("📦 USERS MAP:", users);
 
       // 🟢 UPDATE ONLINE USERS LIST
-      io.emit("online-users", Object.keys(users));
+      broadcastOnlineUsers();
     }
   });
 });
